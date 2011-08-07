@@ -25,7 +25,7 @@ exports.getFileServer = (base, directoryListing, errorHandler) ->
             return handleError req,res,404,err,errorHandler if err
             if dstats.isDirectory()
                 fs.stat "#{resource}/index.htm", (err, stats) ->
-                    return listDirectory req, res, resource, dstats, errorHandler if err && directoryListing
+                    return listDirectory req, res, resource, dstats, errorHandler if err and directoryListing
                     return handleError req,res,404,err,errorHandler if err
                     return serveResource req, res, "#{resource}/index.htm", stats, errorHandler if stats.isFile()
                     handleError req,res,403, null,errorHandler

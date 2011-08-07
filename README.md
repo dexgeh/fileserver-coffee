@@ -20,4 +20,4 @@ Custom error handling:
 
 Customize the Server response header:
 
-    filserver.serverHeader = "'; DROP TABLE SERVER --"
+    fileserver.serverHeader = "'; DROP TABLE SERVER --"
