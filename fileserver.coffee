@@ -32,35 +32,30 @@ exports.getFileServer = (base, directoryListing, errorHandler) ->
             else
                 return serveResource req, res, resource, dstats, errorHandler
 
+sendData = (req, res, mtime, size, contentType, data) ->
+    headers =
+        'Server' : exports.serverHeader
+        'Last-Modified' : new Date(mtime).toUTCString()
+    headers['Content-Length'] = size if size
+    headers['Content-Type'] = contentType if contentType
+    res.writeHead 200, headers
+    res.end data if data
+    res.end() if not data
+
 listDirectory = (req, res, resource, stats, errorHandler) ->
     if req.method is 'HEAD'
-        res.writeHead 200,
-            'Server' : exports.serverHeader
-            'Last-Modified' : new Date(stats.mtime).toUTCString()
-        res.end()
+        sendData req, res, stats.mtime, null, null, null
     if req.method is 'GET'
         fs.readdir resource, (err, files) ->
-            return handleError req,res,500, err,errorHandler if err
-            res.writeHead 200,
-                'Server' : exports.serverHeader
-                'Last-Modified' : new Date(stats.mtime).toUTCString()
-            res.write "<p>#{file}</p>" for file in files
-            res.end()
+            return handleError req,res,500,err,errorHandler if err
+            data = "<p>#{files.join("</p><p>")}</p>"
+            sendData req, res, stats.mtime, data.length, 'text/html', data
 
 serveResource = (req, res, resource, stats, errorHandler) ->
     if req.method is 'HEAD'
-        res.writeHead 200,
-            'Server' : exports.serverHeader
-            'Last-Modified' : new Date(stats.mtime).toUTCString()
-            'Content-Length' : stats.size
-            'Content-Type' : (mime.lookup resource)
-        res.end()
+        sendData req, res, stats.mtime, stats.size, (mime.lookup resource), null
     if req.method is 'GET'
         fs.readFile resource, 'utf8', (err, data) ->
             return handleError req,res,500,err,errorHandler if err
-            res.writeHead 200,
-                'Server' : exports.serverHeader
-                'Last-Modified' : new Date(stats.mtime).toUTCString()
-                'Content-Length' : stats.size
-                'Content-Type' : (mime.lookup resource)
-            res.end(data)
+            sendData req, res, stats.mtime, stats.size, (mime.lookup resource), data
+
