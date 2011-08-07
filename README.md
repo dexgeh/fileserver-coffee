@@ -5,7 +5,7 @@ Sample usage:
     http = require 'http'
     fileserver = require './fileserver'
     config = fileserver.defaultConfig()
-    server = http.createServer fileserver.getFileServer config
+    server = http.createServer (fileserver.getFileServer config)
     server.listen 8080
 
 Enable directory listing:
@@ -21,3 +21,10 @@ Custom error handling:
 Customize the Server response header:
 
     config.headers.Server = "'; DROP TABLE SERVER --"
+
+Configure caching:
+
+    # default configuration
+    config.cache.enabled = true
+    config.cache.fileSizeLimit = 4096
+    config.cache.timeLimit = 1000 * 60 * 5
