@@ -1,8 +1,6 @@
-fs = require 'fs'
+fs   = require 'fs'
 path = require 'path'
 mime = require 'mime'
-
-exports.serverHeader = path.basename(__filename)
 
 errors =
     403 : 'Forbidden'
@@ -10,52 +8,76 @@ errors =
     405 : 'Method not allowed'
     500 : 'Internal server error'
 
-handleError = (req, res, code, err, errorHandler) ->
-    return errorHandler req, res, code, err if errorHandler
-    console.log "#{req.url} #{err.message}" if err
-    res.writeHead(code)
-    res.end errors[code]
+exports.defaultConfig =
+    () -> {
+        errorHandler : (req, res, code, err) ->
+            console.log "#{req.url} #{err.message}" if err and err.message
+            res.writeHead code
+            res.end errors[code]
+        base : '.'
+        directoryListing : false
+        cache : {
+            enabled : true
+            fileSizeLimit : 4096
+            timeLimit : 1000 * 60 * 5
+            data : {}
+        }
+        headers :
+            'Server' : 'fileserver.coffee'
+    }
 
-exports.getFileServer = (base, directoryListing, errorHandler) ->
+cutTrailing = (str, chr) ->
+    return str.substring 0, str.length-1 if str.charAt(str.length-1) is chr
+    str
+
+exports.getFileServer = (config) ->
+    config.base = cutTrailing config.base, '/'
     (req, res) ->
-        return handleError req,res,405,null,errorHandler if req.method isnt 'GET' and req.method isnt 'HEAD'
-        resource = base + path.normalize(req.url)
-        resource = resource.substring(0, resource.length-1) if resource.charAt(resource.length-1) is "/"
-        fs.stat resource, (err, dstats) ->
-            return handleError req,res,404,err,errorHandler if err
-            if dstats.isDirectory()
-                fs.stat "#{resource}/index.htm", (err, stats) ->
-                    return listDirectory req, res, resource, dstats, errorHandler if err and directoryListing
-                    return handleError req,res,404,err,errorHandler if err
-                    return serveResource req, res, "#{resource}/index.htm", stats, errorHandler if stats.isFile()
-                    handleError req,res,403, null,errorHandler
-            else
-                return serveResource req, res, resource, dstats, errorHandler
+        config.errorHandler req, res, 405 if req.method isnt 'GET' and req.method isnt 'POST'
+        resource = "#{config.base}/#{path.normalize req.url}"
+        cacheData = cacheLookup req.url, config if config.cache.enabled
+        sendData req, res, {mtime:cacheData.mtime, size:cacheData.size}, cacheData.data, config, false if cacheData
+        fs.stat resource, (err, stats) ->
+            return config.errorHandler req, res, 404, err if err
+            return sendFile req,res,resource,stats,config if stats.isFile()
+            index = "#{cutTrailing resource, '/'}/index.htm"
+            fs.stat index, (err, statsIdx) ->
+                return listDirectory req, res, resource, stats, config if config.directoryListing and err
+                return config.errorHandler req, res, 404, err if err
+                return sendFile req, res, index, statsIdx, config
 
-sendData = (req, res, mtime, size, contentType, data) ->
-    headers =
-        'Server' : exports.serverHeader
-        'Last-Modified' : new Date(mtime).toUTCString()
-    headers['Content-Length'] = size if size
-    headers['Content-Type'] = contentType if contentType
+cacheLookup = (req, config) ->
+    data = config.cache.data[req.url]
+    return null if data and data.mtime + config.cache.timeLimit > new Date().getTime()
+    data
+
+cacheRequest = (req, stats, data, config) ->
+    config.cache.data[req.url] = {
+        data : data
+        mtime : stats.mtime
+        size : stats.size
+    }
+
+sendData = (req, res, stats, data, config, doCache) ->
+    headers = {}
+    headers[name] = config.headers[name] for name in config.headers
+    headers['Last-Modified'] = new Date(stats.mtime).toUTCString()
+    headers['Content-Length'] = stats.size if stats.isFile()
+    headers['Content-Type'] = (mime.lookup req.url) if stats.isFile()
+    headers['Content-Type'] = 'text/html' if stats.isDirectory() and data
     res.writeHead 200, headers
     res.end data if data
     res.end() if not data
+    cacheRequest req, stats, data, config if config.cache.enabled and config.cache.fileSizeLimit > stats.size and doCache
 
-listDirectory = (req, res, resource, stats, errorHandler) ->
-    if req.method is 'HEAD'
-        sendData req, res, stats.mtime, null, null, null
-    if req.method is 'GET'
-        fs.readdir resource, (err, files) ->
-            return handleError req,res,500,err,errorHandler if err
-            data = "<p>#{files.join("</p><p>")}</p>"
-            sendData req, res, stats.mtime, data.length, 'text/html', data
+sendFile = (req, res, resource, stats, config) ->
+    return sendData req, res, stats, null, config if req.method is 'HEAD'
+    fs.readFile resource, 'utf8', (err, data) ->
+        return config.errorHandler req, res, 500, err if err
+        sendData req, res, stats, data, config, true
 
-serveResource = (req, res, resource, stats, errorHandler) ->
-    if req.method is 'HEAD'
-        sendData req, res, stats.mtime, stats.size, (mime.lookup resource), null
-    if req.method is 'GET'
-        fs.readFile resource, 'utf8', (err, data) ->
-            return handleError req,res,500,err,errorHandler if err
-            sendData req, res, stats.mtime, stats.size, (mime.lookup resource), data
-
+listDirectory = (req, res, resource, stats, config) ->
+    return sendData req,res,stats,null, config if req.method is 'HEAD'
+    fs.readdir resource, (err, files) ->
+        return config.errorHandler req, res, 500, err if err
+        sendData req, res, stats, "<p>#{files.join "</p><p>"}</p>", config, false

@@ -4,20 +4,20 @@ Sample usage:
 
     http = require 'http'
     fileserver = require './fileserver'
-    server = http.createServer fileserver.getFileServer '.'
+    config = fileserver.defaultConfig()
+    server = http.createServer fileserver.getFileServer config
     server.listen 8080
 
 Enable directory listing:
 
-    fileserver.getFileServer '.', true
+    config.directoryListing = true
 
 Custom error handling:
 
-    server = http.createServer fileserver.getFileServer '.', false, (req, res, code, err) ->
-        res.writeHead code,
-            'Content-Type' : 'text/html'
+    config.errorHandler = (req, res, code, err) ->
+        res.writeHead code
         res.end "Error #{code}!!!"
 
 Customize the Server response header:
 
-    fileserver.serverHeader = "'; DROP TABLE SERVER --"
+    config.headers.Server = "'; DROP TABLE SERVER --"
