@@ -33,7 +33,7 @@ cutTrailing = (str, chr) ->
 exports.getFileServer = (config) ->
     config.base = cutTrailing config.base, '/'
     (req, res) ->
-        config.errorHandler req, res, 405 if req.method isnt 'GET' and req.method isnt 'POST'
+        config.errorHandler req, res, 405 if req.method isnt 'GET' and req.method isnt 'HEAD'
         resource = "#{config.base}/#{path.normalize req.url}"
         cacheData = cacheLookup req.url, config if config.cache.enabled
         sendData req, res, {mtime:cacheData.mtime, size:cacheData.size}, cacheData.data, config, false if cacheData
