@@ -30,13 +30,24 @@ cutTrailing = (str, chr) ->
     return str.substring 0, str.length-1 if str.charAt(str.length-1) is chr
     str
 
+trueFn = () ->
+    true
+falseFn = () ->
+    false
+
 exports.getFileServer = (config) ->
     config.base = cutTrailing config.base, '/'
     (req, res) ->
         config.errorHandler req, res, 405 if req.method isnt 'GET' and req.method isnt 'HEAD'
         resource = "#{config.base}/#{path.normalize req.url}"
-        cacheData = cacheLookup req.url, config if config.cache.enabled
-        sendData req, res, {mtime:cacheData.mtime, size:cacheData.size}, cacheData.data, config, false if cacheData
+        cacheData = cacheLookup req, config if config.cache.enabled
+        if cacheData
+            stats =
+                mtime : cacheData.mtime
+                size : cacheData.size
+                isFile : trueFn
+                isDirectory : falseFn
+            return sendData req, res, stats, cacheData.data, config
         fs.stat resource, (err, stats) ->
             return config.errorHandler req, res, 404, err if err
             return sendFile req,res,resource,stats,config if stats.isFile()
@@ -48,7 +59,7 @@ exports.getFileServer = (config) ->
 
 cacheLookup = (req, config) ->
     data = config.cache.data[req.url]
-    return null if data and data.mtime + config.cache.timeLimit > new Date().getTime()
+    null if data and data.mtime + config.cache.timeLimit > new Date().getTime()
     data
 
 cacheRequest = (req, stats, data, config) ->
