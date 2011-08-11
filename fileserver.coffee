@@ -55,7 +55,7 @@ exports.getFileServer = (config) ->
             fs.stat index, (err, statsIdx) ->
                 return listDirectory req, res, resource, stats, config if config.directoryListing and err
                 return config.errorHandler req, res, 404, err if err
-                return sendFile req, res, index, statsIdx, config
+                return sendFile req, res, index, stats, config
 
 cacheLookup = (req, config) ->
     data = config.cache.data[req.url]
