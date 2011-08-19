@@ -1,6 +1,6 @@
 fs   = require 'fs'
-path = require 'path'
 mime = require 'mime'
+url  = require 'url'
 
 errors =
     403 : 'Forbidden'
@@ -8,87 +8,93 @@ errors =
     405 : 'Method not allowed'
     500 : 'Internal server error'
 
-exports.defaultConfig =
-    () -> {
-        errorHandler : (req, res, code, err) ->
-            console.log "#{req.url} #{err.message}" if err and err.message
-            res.writeHead code
-            res.end errors[code]
-        base : '.'
-        directoryListing : false
-        cache : {
-            enabled : true
-            fileSizeLimit : 4096
-            timeLimit : 1000 * 60 * 5
-            data : {}
-        }
-        headers :
-            'Server' : 'fileserver.coffee'
-    }
+exports.defaultConfig = () ->
+    errorHandler : (req, res, code, err) ->
+        console.log "#{req.url} #{err.message}" if err and err.message
+        res.writeHead code
+        res.end errors[code]
+    base : '.'
+    directoryListing : false
+    headers :
+        'Server' : 'fileserver.coffee'
+        'Transfer-Encoding' : 'chunked'
+    cache :
+        enabled : true
+        fileSizeLimit : 1024 * 32
 
 cutTrailing = (str, chr) ->
     return str.substring 0, str.length-1 if str.charAt(str.length-1) is chr
     str
 
-trueFn = () ->
-    true
-falseFn = () ->
-    false
+trueFn = () -> true
+falseFn = () -> false
+
+GET = 'GET'
+HEAD = 'HEAD'
+
+PATH_SEPARATOR = '/'
 
 exports.getFileServer = (config) ->
-    config.base = cutTrailing config.base, '/'
+    config.base = cutTrailing config.base, PATH_SEPARATOR
+    if not config.cache.data
+        config.cache.data = {}
     (req, res) ->
-        config.errorHandler req, res, 405 if req.method isnt 'GET' and req.method isnt 'HEAD'
-        resource = "#{config.base}/#{path.normalize req.url}"
-        cacheData = cacheLookup req, config if config.cache.enabled
-        if cacheData
-            stats =
-                mtime : cacheData.mtime
-                size : cacheData.size
-                isFile : trueFn
-                isDirectory : falseFn
-            return sendData req, res, stats, cacheData.data, config
+        config.errorHandler req, res, 405 if req.method isnt GET and req.method isnt HEAD
+        cacheHit = config.cache.data[req.url]
+        if cacheHit
+            return sendData req, res, null, cacheHit.buffer, cacheHit.headers, config
+        resource = "#{config.base}/#{(url.parse req.url).pathname}"
         fs.stat resource, (err, stats) ->
             return config.errorHandler req, res, 404, err if err
-            return sendFile req,res,resource,stats,config if stats.isFile()
-            index = "#{cutTrailing resource, '/'}/index.htm"
+            return sendFile req, res, resource, stats, config if stats.isFile()
+            index = "#{cutTrailing resource,'/'}/index.htm"
             fs.stat index, (err, statsIdx) ->
                 return listDirectory req, res, resource, stats, config if config.directoryListing and err
                 return config.errorHandler req, res, 404, err if err
                 return sendFile req, res, index, stats, config
+            
 
-cacheLookup = (req, config) ->
-    data = config.cache.data[req.url]
-    null if data and data.mtime + config.cache.timeLimit > new Date().getTime()
-    data
+cacheRequest = (req, resource, buffer, headers, config) ->
+    config.cache.data[req.url] =
+        resource : resource
+        buffer : buffer
+        headers : headers
+    if resource
+        fs.watchFile resource, (curr, prev) ->
+            config.cache.data[req.url] = null
+            fs.unwatchFile resource
 
-cacheRequest = (req, stats, data, config) ->
-    config.cache.data[req.url] = {
-        data : data
-        mtime : stats.mtime
-        size : stats.size
-    }
+mergeHeaders = (config, additional) ->
+    result = {}
+    result[key] = value for key,value of config
+    result[key] = value for key,value of additional
+    return result
 
-sendData = (req, res, stats, data, config, doCache) ->
-    headers = {}
-    headers[name] = config.headers[name] for name in config.headers
-    headers['Last-Modified'] = new Date(stats.mtime).toUTCString()
-    headers['Content-Length'] = stats.size if stats.isFile()
-    headers['Content-Type'] = (mime.lookup req.url) if stats.isFile()
-    headers['Content-Type'] = 'text/html' if stats.isDirectory() and data
+
+sendData = (req, res, resource, buffer, headers, config, doCache) ->
     res.writeHead 200, headers
-    res.end data if data
-    res.end() if not data
-    cacheRequest req, stats, data, config if config.cache.enabled and config.cache.fileSizeLimit > stats.size and doCache
-
-sendFile = (req, res, resource, stats, config) ->
-    return sendData req, res, stats, null, config if req.method is 'HEAD'
-    fs.readFile resource, 'utf8', (err, data) ->
-        return config.errorHandler req, res, 500, err if err
-        sendData req, res, stats, data, config, true
+    res.end buffer if buffer
+    res.end '' if not buffer
+    cacheRequest req, resource, buffer, headers, config if doCache and config.cache.enabled
 
 listDirectory = (req, res, resource, stats, config) ->
-    return sendData req,res,stats,null, config if req.method is 'HEAD'
     fs.readdir resource, (err, files) ->
         return config.errorHandler req, res, 500, err if err
-        sendData req, res, stats, "<p>#{files.join "</p><p>"}</p>", config, false
+        html = "<p>#{files.join "</p><p>"}</p>"
+        headers = mergeHeaders config.headers,
+            'Content-Type' : 'text/html'
+            'Content-Length' : html.length
+        sendData req, res, resource, html, headers, config if req.method is GET
+        sendData req, res, resource, null, headers, config if req.method is HEAD
+
+sendFile = (req, res, resource, stats, config) ->
+   headers = mergeHeaders config.headers,
+       'Content-Type' : mime.lookup resource
+       'Content-Length' : stats.size
+   if req.method is HEAD
+        return sendData req, res, null, headers, config
+    if req.method is GET
+        fs.readFile resource, (err, data) ->
+            return config.errorHandler req, res, 500, err if err
+            sendData req, res, resource, data, headers, config, config.cache.enabled
+            
