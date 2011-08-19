@@ -72,9 +72,12 @@ mergeHeaders = (config, additional) ->
 
 
 sendData = (req, res, resource, buffer, headers, config, doCache) ->
-    res.writeHead 200, headers
-    res.end buffer if buffer
-    res.end '' if not buffer
+    if req.headers['if-none-match'] is headers['ETag']
+        res.writeHead 304, headers
+        res.end null
+    else
+        res.writeHead 200, headers
+        res.end buffer
     cacheRequest req, resource, buffer, headers, config if doCache and config.cache.enabled
 
 listDirectory = (req, res, resource, stats, config) ->
@@ -91,6 +94,7 @@ sendFile = (req, res, resource, stats, config) ->
    headers = mergeHeaders config.headers,
        'Content-Type' : mime.lookup resource
        'Content-Length' : stats.size
+       'ETag' : "#{new Date(stats.mtime).getTime()}"
    if req.method is HEAD
         return sendData req, res, null, headers, config
     if req.method is GET
