@@ -39,7 +39,7 @@ exports.getFileServer = (config) ->
     if not config.cache.data
         config.cache.data = {}
     (req, res) ->
-        config.errorHandler req, res, 405 if req.method isnt GET and req.method isnt HEAD
+        return config.errorHandler req, res, 405 if req.method isnt GET and req.method isnt HEAD
         cacheHit = config.cache.data[req.url]
         if cacheHit
             return sendData req, res, null, cacheHit.buffer, cacheHit.headers, config
