@@ -26,9 +26,6 @@ cutTrailing = (str, chr) ->
     return str.substring 0, str.length-1 if str.charAt(str.length-1) is chr
     str
 
-trueFn = () -> true
-falseFn = () -> false
-
 GET = 'GET'
 HEAD = 'HEAD'
 
